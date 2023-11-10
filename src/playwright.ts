@@ -1,9 +1,72 @@
 import * as fs from "fs";
 import Jimp from "jimp";
 import { cleanUpScript } from "./prompts";
+import { Page } from "playwright";
 
-const scriptToHighlight =
-  "await page.evaluate(\"document.querySelectorAll('*').forEach((e) => { if (!e.id && !e.className) return; const rect = e.getBoundingClientRect(); const left = rect.left + window.scrollX; const top = rect.top + window.scrollY; const div = document.createElement('div'); div.innerText = ''; if (e.id) div.innerText += ` id=${e.id}`; if (e.className) div.innerText += ` class=${e.className}`; div.style = `background: black; color: white; font-size: 12px; position: absolute; top: ${top-12}px; left: ${left-6}px`; document.getElementsByTagName('body')[0].appendChild(div); });\");";
+async function highlight(page: Page) {
+  const highlightInner = () => {
+    document.querySelectorAll("a,button,input").forEach((e) => {
+      const attrs = e.attributes;
+      const attrPairsP1: string[] = [];
+      const attrPairsP2: string[] = [];
+      const attrPairsP3: string[] = [];
+      for (let i = 0; i < attrs.length; i++) {
+        const attr = attrs[i];
+        const attrName = attr.name.trim();
+        const attrValue = attr.value.trim();
+        if (attrName.length === 0 || attrValue.length === 0) continue;
+
+        switch (attrName) {
+          case "id":
+            attrPairsP1.push(`${attrName}=${attrValue}`);
+            break;
+          case "aria-label":
+          case "title":
+            if (attrPairsP2.length === 0) {
+              if (attrValue !== (e as HTMLElement).innerText) {
+                attrPairsP2.push(`${attrName}=${attrValue}`);
+              }
+            }
+            break;
+          case "class":
+            attrPairsP3.push(`${attrName}=${attrValue}`);
+            break;
+        }
+      }
+
+      const attrPairs: string[] = [];
+      if (attrPairsP1.length > 0) {
+        attrPairs.push(...attrPairsP1);
+      } else if (attrPairsP2.length > 0) {
+        attrPairs.push(...attrPairsP2);
+      } else {
+        attrPairs.push(...attrPairsP3);
+      }
+      if (attrPairs.length === 0) return;
+
+      const rect = e.getBoundingClientRect();
+      const left = rect.left + window.scrollX;
+      const top = rect.top + window.scrollY;
+
+      const div = document.createElement("div");
+      div.innerText = attrPairs.join(" ");
+      div.style.cssText = `
+        background: black;
+        color: white;
+        font-size: 12px;
+        position: absolute;
+        top: ${top - 12}px;
+        left: ${left - 6}px;
+        z-index: 2147483647;
+      `;
+      document.getElementsByTagName("body")[0].appendChild(div);
+    });
+  };
+
+  await page.evaluate(`(${highlightInner.toString()})();`);
+}
+
+const scriptToHighlight = `(${highlight.toString()})(page);`;
 
 export async function screenshot(script: string): Promise<string> {
   const now = Date.now();
