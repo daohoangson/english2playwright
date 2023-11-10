@@ -1,6 +1,4 @@
-import OpenAI from "openai";
-
-export type Messages = OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+import { Messages } from "./openai";
 
 export const initialScript = `const { chromium } = require('playwright');
 
@@ -32,8 +30,8 @@ export function log({
   messages,
   requirement,
 }: {
-  examples: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
-  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+  examples: Messages;
+  messages: Messages;
   requirement: string;
 }) {
   console.log(
@@ -53,7 +51,7 @@ export function log({
                   }
                   return `${m.role}: ${text.trim()}`;
                 case "image_url":
-                  return `${type}: ${c.image_url.url}`;
+                  return `${m.role}: ${type}`;
               }
             })
             .join("\n");

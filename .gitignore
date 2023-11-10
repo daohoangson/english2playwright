@@ -1,2 +1,4 @@
 /node_modules/
 *.log
+openai.json
+output.js

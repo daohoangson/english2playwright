@@ -1,5 +1,4 @@
-import OpenAI from "openai";
-import { trackCost } from "./src/cost";
+import { MessageContent, Messages, createChatCompletion } from "./src/openai";
 import { screenshot } from "./src/playwright";
 import * as prompts from "./src/prompts";
 
@@ -18,38 +17,36 @@ Some website uses custom date or number picker, you should trigger the custom pi
 You write one Playwright command at a time.`;
 
 const examples = prompts.generateExample(character);
-const openai = new OpenAI();
-async function prompt(messages: prompts.Messages): Promise<string> {
+async function prompt(messages: Messages): Promise<string> {
   prompts.log({ examples, messages, requirement });
-  const { choices, usage } = await openai.chat.completions.create({
+  const assistant = await createChatCompletion({
     messages,
     model: "gpt-4-vision-preview",
     max_tokens: 1024,
     temperature: 0.2,
   });
-  trackCost(usage);
 
-  const reply = choices[0].message.content ?? "🤷";
-  const match = reply.match(/```javascript([\s\S]*?)```/);
+  const match = assistant.match(/```javascript([\s\S]*?)```/);
   if (match !== null) {
-    console.log(reply);
+    console.log(`assistant: ${assistant}`);
     return match[1].trim();
   }
-  console.warn(`Could not find any JavaScript in reply: ${reply}`);
+
+  console.warn(`Could not find any JavaScript: ${assistant}`);
   process.exit(0);
 }
 
 (async function main() {
-  let checkpointMessages: prompts.Messages = [];
+  let checkpointMessages: Messages = [];
   let checkpointScript = prompts.initialScript;
-  let messages: prompts.Messages = [];
+  let messages: Messages = [];
 
   function updateCheckpoint(newScript: string, screenshotUrl?: string) {
     checkpointMessages = [];
     checkpointScript = newScript;
     const hasScreenshot = typeof screenshotUrl === "string";
 
-    const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+    const content: MessageContent = [
       {
         type: "text",
         text: `${character}\n\nRequirement: ${requirement}\n\n\`\`\`javascript\n${checkpointScript}\n${prompts.cleanUpScript}\n\`\`\``,
@@ -70,7 +67,7 @@ async function prompt(messages: prompts.Messages): Promise<string> {
 
   let loop = 0;
   while (true) {
-    console.log(`Loop number: ${++loop}`);
+    console.log(`\n\nLoop number: ${++loop}`);
     if (loop === 1) {
       updateCheckpoint(prompts.initialScript);
     }
@@ -85,8 +82,11 @@ async function prompt(messages: prompts.Messages): Promise<string> {
       const newScript = `${checkpointScript}\n  ${line}`;
       const screenshotUrl = await screenshot(newScript);
       updateCheckpoint(newScript, screenshotUrl); // success 🎉
-    } catch (error) {
-      messages.push({ role: "user", content: JSON.stringify({ error }) });
+    } catch (screenshotError) {
+      messages.push({
+        role: "user",
+        content: JSON.stringify({ error: screenshotError.message }),
+      });
     }
   }
 })();

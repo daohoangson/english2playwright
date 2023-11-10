@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import { cleanUpScript } from "./prompts";
 
 const scriptToHighlight =
@@ -14,10 +15,8 @@ export async function screenshot(script: string): Promise<string> {
   const scriptToScreenshot = `await page.screenshot({ path: './${relativePath}' });`;
 
   const evalScript = `${script};\n${scriptToHighlight}\n${scriptToScreenshot}\n${cleanUpScript}`;
-  console.log(`Taking screenshot...`);
-  console.log("```javascript");
-  console.log(`${script}\n${cleanUpScript}`);
-  console.log("```");
+  fs.writeFileSync("output.js", `${script}\n${cleanUpScript}`);
+  console.log(`playwright: Taking screenshot...`);
   await eval(evalScript);
 
   return `${ngrokUrl}/${relativePath}`;
