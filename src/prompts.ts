@@ -3,7 +3,7 @@ import { Messages } from "./openai";
 export const initialScript = `const { chromium } = require('playwright');
 
 (async () => {
-  const browser = await chromium.launch({ channel: "chrome" });
+  const browser = await chromium.launch({ channel: "chrome", headless: false });
   const page = await browser.newPage({ screen: { width: 600, height: 400 } });`;
 
 // use try catch because AI may generate the close command by itself
