@@ -1,7 +1,8 @@
 import * as fs from "fs";
 import Jimp from "jimp";
-import { cleanUpScript } from "./prompts";
 import { Page } from "playwright";
+import sanitizeHtml from "sanitize-html";
+import { cleanUpScript } from "./prompts";
 
 async function highlight(page: Page) {
   const highlightInner = () => {
@@ -68,16 +69,26 @@ async function highlight(page: Page) {
 
 const scriptToHighlight = `(${highlight.toString()})(page);`;
 
-export async function screenshot(script: string): Promise<string> {
+export async function snapshot(script: string): Promise<{ html: string }> {
+  const now = Date.now();
+  const htmlPath = `screenshots/${now}.html`;
+  const importToCaptureHtml = 'const { writeFileSync } = require("fs");';
+  const scriptToCaptureHtml = `const html = await page.content(); writeFileSync('./${htmlPath}', html);`;
+
+  console.log(`playwright: Capturing ${htmlPath}...`);
+  await evalScript(importToCaptureHtml, script, scriptToCaptureHtml);
+
+  return { html: sanitizeHtml(fs.readFileSync(htmlPath).toString("utf8")) };
+}
+
+export async function screenshot(script: string): Promise<{ dataUri: string }> {
   const now = Date.now();
   const jpegPath = `screenshots/${now}.jpeg`;
   const pngPath = `screenshots/${now}.png`;
   const scriptToScreenshot = `await page.screenshot({ path: './${pngPath}' });`;
 
-  const evalScript = `${script};\n${scriptToHighlight}\n${scriptToScreenshot}\n${cleanUpScript}`;
-  fs.writeFileSync("output.js", `${script}\n${cleanUpScript}`);
   console.log(`playwright: Taking ${pngPath}...`);
-  await eval(evalScript);
+  await evalScript("", script, `${scriptToHighlight}\n${scriptToScreenshot}`);
 
   let bufferPath = pngPath;
   const pngStat = fs.statSync(pngPath);
@@ -92,5 +103,11 @@ export async function screenshot(script: string): Promise<string> {
   const buffer = fs.readFileSync(bufferPath);
   const base64 = buffer.toString("base64");
   const mimeType = `image/${bufferPath === pngPath ? "png" : "jpeg"}`;
-  return `data:image/${mimeType};base64,${base64}`;
+  return { dataUri: `data:image/${mimeType};base64,${base64}` };
+}
+
+async function evalScript(before: string, script: string, after: string) {
+  const mergedScript = `${before};\n${script};\n${after};\n\n${cleanUpScript}`;
+  fs.writeFileSync("output.js", mergedScript);
+  await eval(mergedScript);
 }

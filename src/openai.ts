@@ -9,9 +9,11 @@ let openai: OpenAI | undefined;
 export type MessageContent =
   OpenAI.Chat.Completions.ChatCompletionContentPart[];
 export type Messages = OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+export type CreateChatCompletionInput =
+  OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
 
 export async function createChatCompletion(
-  body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+  body: CreateChatCompletionInput
 ): Promise<string> {
   fs.appendFileSync("openai.json", JSON.stringify({ body }) + "\n");
   const apiKey = process.env.OPENAI_API_KEY ?? "";

@@ -46,8 +46,12 @@ export function log({
               switch (type) {
                 case "text":
                   let { text } = c;
-                  if (m.role === "user" && text.includes(requirement)) {
-                    text = requirement;
+                  if (m.role === "user") {
+                    if (text.includes(requirement)) {
+                      text = requirement;
+                    } else if (text.startsWith("HTML:\n\n")) {
+                      text = "HTML";
+                    }
                   }
                   return `${m.role}: ${text.trim()}`;
                 case "image_url":
