@@ -1,10 +1,10 @@
+import fs from "fs";
 import {
   CreateChatCompletionInput,
-  MessageContent,
   Messages,
   createChatCompletion,
 } from "./src/openai";
-import { snapshot, screenshot } from "./src/playwright";
+import { executeFn, functions } from "./src/openai_functions";
 import * as prompts from "./src/prompts";
 
 const requirement = (process.argv[process.argv.length - 1] ?? "").trim();
@@ -13,13 +13,15 @@ if (!requirement.startsWith("Write test script to")) {
 }
 
 const character = `You are a professional automation quality engineer.
-You read requirement and write Playwright in JavaScript to automate the test.
+You read requirement and write test script in JavaScript, using Playwright to automate testing.
 
-You write one Playwright command at a time, a screenshot will be provided after executing that command.
-Each element will be highlighted with a black box and its id, class attributes.
-For other elements, prefer text-based selector like \`await page.click("text='Button text'");\` to improve the stability of the script.
-Some website uses custom date or number picker, you should trigger the custom picker then click the buttons instead of filling textual value directly.
-You write one Playwright command at a time.`;
+Do it step by step:
+- Explore the application under testing to understand its layout and elements
+- Explain yourself as you are exploring the AUT
+- Update the test script to save your progress frequently
+- Inform the user when the test script is updated so they can verify it
+
+`;
 
 const examples = prompts.generateExample(character);
 const model: CreateChatCompletionInput["model"] = "gpt-4-1106-preview";
@@ -49,45 +51,31 @@ async function prompt(messages: Messages): Promise<string> {
   let checkpointScript = prompts.initialScript;
   let messages: Messages = [];
 
-  function updateCheckpoint(
-    newScript: string,
-    {
-      snapshotData,
-      screenshotData,
-    }: {
-      snapshotData?: Awaited<ReturnType<typeof snapshot>>;
-      screenshotData?: Awaited<ReturnType<typeof screenshot>>;
-    } = {}
-  ) {
-    checkpointMessages = [];
-    checkpointScript = newScript;
-    const hasSnapshot = typeof snapshotData === "object";
-    const hasScreenshot = typeof screenshotData === "object";
-
-    const content: MessageContent = [
+  checkpointMessages.push({ role: "system", content: character });
+  checkpointMessages.push({
+    role: "user",
+    content: [
       {
         type: "text",
-        text: `${character}\n\nRequirement: ${requirement}\n\n\`\`\`javascript\n${checkpointScript}\n${prompts.cleanUpScript}\n\`\`\``,
+        text:
+          `Requirement: ${requirement}\n\n` +
+          "```javascript\n" +
+          checkpointScript +
+          "\n```",
       },
-    ];
-    if (!hasSnapshot && !hasScreenshot) {
-      checkpointMessages.push(...examples); // needed for first prompt
-    } else {
-      if (hasSnapshot) {
-        content.push({
-          type: "text",
-          text: `HTML:\n\n${snapshotData.html}`,
-        });
-      }
-      if (hasScreenshot) {
-        content.push({
-          type: "image_url",
-          image_url: { url: screenshotData.dataUri },
-        });
-      }
+    ],
+  });
+
+  function updateCheckpoint(newScript: string) {
+    const diff = newScript.replace(checkpointScript, "");
+    if (diff.length > 0) {
+      checkpointScript = newScript;
+      checkpointMessages.push({
+        role: "assistant",
+        content: "Execute this:\n\n```javascript\n" + diff + "\n```",
+      });
     }
 
-    checkpointMessages.push({ role: "user", content });
     messages = [...checkpointMessages];
   }
 
@@ -96,27 +84,52 @@ async function prompt(messages: Messages): Promise<string> {
     console.log(`\n\nLoop number: ${++loop}`);
     if (loop === 1) {
       updateCheckpoint(prompts.initialScript);
+    } else {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === "assistant") {
+        const snapshotFunction = functions.find((f) => f.name === "snapshot");
+        if (typeof snapshotFunction === "undefined") {
+          throw new Error("Could not find snapshot function");
+        }
+
+        // @ts-ignore
+        const snapshotResult = await snapshotFunction.function(null, null);
+        messages.push({
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                "Look good, continue exploring from here:\n\nSnapshot:\n\n" +
+                JSON.stringify(snapshotResult),
+            },
+          ],
+        });
+      }
     }
 
     const line = await prompt(messages);
     messages.push({
       role: "assistant",
-      content: `\`\`\`javascript\n${line}\n\`\`\``, // for retry, self healing
+      content: "Try this:\n\n```javascript\n" + line + "\n```",
     });
 
-    try {
-      const newScript = `${checkpointScript}\n  ${line}`;
-      const snapshotData = isVisionModel
-        ? undefined
-        : await snapshot(newScript);
-      const screenshotData = isVisionModel
-        ? await screenshot(newScript)
-        : undefined;
-      updateCheckpoint(newScript, { snapshotData, screenshotData }); // success 🎉
-    } catch (screenshotError) {
+    const newScript = `${checkpointScript}\n  ${line}`;
+    const result = await executeFn<{}>(async (page) => {
+      fs.writeFileSync("output.js", newScript);
+
+      const AsyncFunction = async function () {}.constructor;
+      const fnBody = newScript.replace(prompts.initialScript, "");
+      const fn = AsyncFunction("page", fnBody);
+      await fn(page);
+      return { success: true };
+    }, {});
+    if (result.success) {
+      updateCheckpoint(newScript); // success 🎉
+    } else {
       messages.push({
         role: "user",
-        content: JSON.stringify({ error: screenshotError.message }),
+        content: JSON.stringify(result),
       });
     }
   }

@@ -1,43 +1,65 @@
 import * as fs from "fs";
 import OpenAI from "openai";
-import { mockChatCompletion } from "./openai.mocks";
+import { ChatCompletionFunctionRunnerParams } from "openai/resources/beta/chat/completions";
+import {
+  closeGlobalBrowser,
+  functions,
+  globalTestScriptLines,
+} from "./openai_functions";
 
 let ltdCount = 0;
 let ltdCost = 0.0;
-let openai: OpenAI | undefined;
+
+const apiKey = process.env.OPENAI_API_KEY ?? "";
+let openai = new OpenAI({ apiKey });
 
 export type MessageContent =
   OpenAI.Chat.Completions.ChatCompletionContentPart[];
 export type Messages = OpenAI.Chat.Completions.ChatCompletionMessageParam[];
-export type CreateChatCompletionInput =
-  OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
+
+type RunFunctionsInput = ChatCompletionFunctionRunnerParams<any>;
+export type CreateChatCompletionInput = Omit<RunFunctionsInput, "functions">;
 
 export async function createChatCompletion(
   body: CreateChatCompletionInput
 ): Promise<string> {
   fs.appendFileSync("openai.json", JSON.stringify({ body }) + "\n");
-  const apiKey = process.env.OPENAI_API_KEY ?? "";
-  if (apiKey === "") {
-    const mocked = mockChatCompletion(body);
-    if (typeof mocked !== "undefined") {
-      return mocked.choices[0].message.content!;
-    }
-  }
-
-  if (typeof openai === "undefined") {
-    if (apiKey.length === 0) {
-      console.error("OPENAI_API_KEY is not set");
-      process.exit(1);
-    }
-    openai = new OpenAI({ apiKey });
-  }
 
   console.log(`assistant: Generating...`);
-  const completion = await openai!.chat.completions.create(body);
-  fs.appendFileSync("openai.json", JSON.stringify({ completion }) + "\n");
-  trackCost(completion);
 
-  return completion.choices[0].message.content ?? "🤷";
+  globalTestScriptLines.length = 0;
+
+  const runner = openai.beta.chat.completions.runFunctions({
+    ...body,
+    functions,
+  });
+
+  runner.on("chatCompletion", (chatCompletion) => {
+    fs.appendFileSync("openai.json", JSON.stringify({ chatCompletion }) + "\n");
+    trackCost(chatCompletion);
+  });
+  // runner.on("functionCall", (functionCall) =>
+  //   fs.appendFileSync("openai.json", JSON.stringify({ functionCall }) + "\n")
+  // );
+  runner.on("functionCallResult", (functionCallResult) =>
+    fs.appendFileSync(
+      "openai.json",
+      JSON.stringify({ functionCallResult }) + "\n"
+    )
+  );
+  // runner.on("message", (message) =>
+  //   fs.appendFileSync("openai.json", JSON.stringify({ message }) + "\n")
+  // );
+
+  await runner.done();
+  await closeGlobalBrowser();
+
+  const lines = globalTestScriptLines.join("\n").trim();
+  if (lines.length === 0) {
+    return lines;
+  }
+
+  return "```javascript\n" + lines + "\n```";
 }
 
 function trackCost({ usage }: OpenAI.Chat.Completions.ChatCompletion) {

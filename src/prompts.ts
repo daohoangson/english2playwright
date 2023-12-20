@@ -37,6 +37,7 @@ export function log({
   console.log(
     messages
       .filter((m) => m !== examples[0] && m !== examples[1])
+      .filter((m) => m.role !== "system")
       .map((m) => {
         const content = m.content;
         if (Array.isArray(content)) {
@@ -51,6 +52,8 @@ export function log({
                       text = requirement;
                     } else if (text.startsWith("HTML:\n\n")) {
                       text = "HTML";
+                    } else if (text.indexOf("Snapshot:\n\n") > -1) {
+                      text = "Snapshot";
                     }
                   }
                   return `${m.role}: ${text.trim()}`;
